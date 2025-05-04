@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Views - GeoServer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+
+        .sql-item {
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .sql-header {
+            background-color: #f8f9fa;
+            padding: 10px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .sql-header:hover {
+            background-color: #e9ecef;
+        }
+
+        .sql-content {
+            display: none;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #ddd;
+        }
+
+        pre {
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .description {
+            margin-bottom: 10px;
+            font-style: italic;
+            color: #555;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>SQL Views - GeoServer</h1>
+
+    <div class="sql-item">
+        <div class="sql-header" onclick="toggleContent(this)">Consulta 1: População em áreas de risco (Alta
+            vulnerabilidade)</div>
+        <div class="sql-content">
+            <div class="description">
+                Filtra população em áreas de risco com alta vulnerabilidade a inundações nos estados do PR, SC e RS.
+                Usado anteriormente para filtrar pela região sul do Brasil
+            </div>
+            <pre><code>SELECT pop.gid, pop.geom
+FROM populacao_area_de_risco AS pop
+JOIN vulnerabilidade_a_inundacoes_cursos_dagua AS vul 
+ON ST_Intersects(pop.geom, vul.geom)
+JOIN municipios AS mun 
+ON pop.municipio = mun.nm_mun
+JOIN setores_censitarios AS sc 
+ON sc."CD_MUN" = mun.cd_mun
+WHERE mun.sg_uf IN ('PR', 'SC', 'RS')
+AND sc."CD_SIT" IN ('5', '6', '7', '8')
+AND vul.frequencia = 'Alta'
+AND vul.impacto = 'Alto'</code></pre>
+        </div>
+    </div>
+
+    <div class="sql-item">
+        <div class="sql-header" onclick="toggleContent(this)">Consulta 2: Municípios com setores censitários específicos
+        </div>
+        <div class="sql-content">
+            <div class="description">
+                Seleciona municípios dos estados do PR, SC e RS com setores censitários de código '9'.
+            </div>
+            <pre><code>SELECT mun.id_mun, mun.geom
+FROM municipios AS mun
+JOIN vulnerabilidade_a_inundacoes_cursos_dagua AS vul 
+ON ST_Intersects(mun.geom, ST_transform(vul.geom, 4674))
+JOIN setores_censitarios AS sc 
+ON sc."CD_MUN" = mun.cd_mun
+WHERE mun.sg_uf IN ('PR', 'SC', 'RS')
+AND sc."CD_SIT" = '9'</code></pre>
+        </div>
+    </div>
+
+    <div class="sql-item">
+        <div class="sql-header" onclick="toggleContent(this)">Consulta 3: População em áreas de risco (sem filtro de
+            vulnerabilidade)</div>
+        <div class="sql-content">
+            <div class="description">
+                Retorna toda a população em áreas de risco nos estados do PR, SC e RS.
+            </div>
+            <pre><code>SELECT pop.gid, pop.geom
+FROM populacao_area_de_risco AS pop
+JOIN vulnerabilidade_a_inundacoes_cursos_dagua AS vul 
+ON ST_Intersects(pop.geom, vul.geom)
+JOIN municipios AS mun 
+ON pop.municipio = mun.nm_mun
+WHERE mun.sg_uf IN ('PR', 'SC', 'RS')</code></pre>
+        </div>
+    </div>
+
+    <div class="sql-item">
+        <div class="sql-header" onclick="toggleContent(this)">Consulta 4: Todos os registros de população em áreas de
+            risco</div>
+        <div class="sql-content">
+            <div class="description">
+                Consulta simples para retornar todos os dados da tabela de população em áreas de risco.
+            </div>
+            <pre><code>SELECT * FROM populacao_area_de_risco</code></pre>
+        </div>
+    </div>
+
+    <div class="sql-item">
+        <div class="sql-header" onclick="toggleContent(this)">Consulta 5: Priorização de setores censitários no RS</div>
+        <div class="sql-content">
+            <div class="description">
+                Calcula um índice de prioridade para setores censitários no RS com base em pesos.
+            </div>
+            <pre><code>WITH pesos AS (
+    SELECT 
+        unnest(ARRAY['0','1', '2', '3', '4','5', '6', '7', '8', '9']) AS "CD_TIPO",
+        unnest(ARRAY[1, 9, 8, 5, 7, 6, 4, 10, 2, 3]) AS peso_tipo
+),
+pesos_sit AS (
+    SELECT 
+        unnest(ARRAY['1', '2', '3', '5', '6', '7', '8', '9']) AS "CD_SIT",
+        unnest(ARRAY[10, 9, 8, 7, 6, 5, 4, 3]) AS peso_sit
+),
+matriz_prioridade AS (
+    SELECT 
+        s."CD_SETOR",
+        s."CD_TIPO",
+        s."CD_SIT",
+        s.geometry,
+        s."NM_UF",
+        p.peso_tipo,
+        ps.peso_sit,
+        (p.peso_tipo * ps.peso_sit) AS indice_prioridade
+    FROM setores_censitarios s
+    JOIN pesos p ON s."CD_TIPO" = p."CD_TIPO"
+    JOIN pesos_sit ps ON s."CD_SIT" = ps."CD_SIT"
+)
+SELECT ST_Intersection(mp.geometry,ST_Transform(pop.geom, 4674)) AS intersecao,
+    mp.indice_prioridade
+FROM matriz_prioridade mp
+JOIN populacao_area_de_risco pop ON ST_Intersects(mp.geometry, ST_Transform(pop.geom, 4674))
+WHERE mp."NM_UF" = 'Rio Grande do Sul'
+ORDER BY indice_prioridade DESC</code></pre>
+        </div>
+    </div>
+
+    <div class="sql-item">
+        <div class="sql-header" onclick="toggleContent(this)">Consulta 6: População em áreas de risco (filtro por UF)
+        </div>
+        <div class="sql-content">
+            <div class="description">
+                Retorna a população em áreas de risco nos estados do PR, SC e RS, usado anteriormente para filtrar pela
+                região sul do Brasil, sem filtro de vulnerabilidade.
+            </div>
+            <pre><code>SELECT id, pop.geom FROM populacao_area_de_risco AS pop
+JOIN municipios AS mun ON pop.municipio = mun.nm_mun
+WHERE mun.sg_uf IN ('PR', 'SC', 'RS')</code></pre>
+        </div>
+    </div>
+
+    <div class="sql-item">
+        <div class="sql-header" onclick="toggleContent(this)">Consulta 7: População em áreas de alta vulnerabilidade
+        </div>
+        <div class="sql-content">
+            <div class="description">
+                Filtra população em áreas de risco com alta vulnerabilidade a inundações.
+            </div>
+            <pre><code>SELECT pop.gid, pop.geom
+FROM populacao_area_de_risco AS pop
+JOIN vulnerabilidade_a_inundacoes_cursos_dagua AS vul 
+ON ST_Intersects(pop.geom, vul.geom)
+JOIN municipios AS mun 
+ON pop.municipio = mun.nm_mun
+WHERE mun.sg_uf IN ('PR', 'SC', 'RS')
+AND vul.frequencia = 'Alta'
+AND vul.impacto = 'Alto'</code></pre>
+        </div>
+    </div>
+
+    <div class="sql-item">
+        <div class="sql-header" onclick="toggleContent(this)">Consulta 8: População em áreas de vulnerabilidade média
+        </div>
+        <div class="sql-content">
+            <div class="description">
+                Filtra população em áreas de risco com vulnerabilidade média a inundações.
+            </div>
+            <pre><code>SELECT pop.gid, pop.geom 
+FROM populacao_area_de_risco AS pop
+JOIN vulnerabilidade_a_inundacoes_cursos_dagua AS vul 
+ON ST_Intersects(pop.geom, vul.geom)
+JOIN municipios AS mun 
+ON pop.municipio = mun.nm_mun
+WHERE mun.sg_uf IN ('PR', 'SC', 'RS')
+AND vul.vulnerabil = 'Média'</code></pre>
+        </div>
+    </div>
+
+    <script>
+        function toggleContent(header) {
+            const content = header.nextElementSibling;
+            if (content.style.display === "block") {
+                content.style.display = "none";
+            } else {
+                content.style.display = "block";
+            }
+        }
+    </script>
+</body>
+
+</html>
